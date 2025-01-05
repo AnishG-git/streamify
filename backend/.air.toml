@@ -1,0 +1,15 @@
+# Config for air live reloading
+[build]
+  bin = "tmp/main" # Where the built binary will be stored
+  cmd = "go build -o tmp/main" # Build command
+  full_bin = "APP_ENV=dev tmp/main" # Command to run the built binary
+  poll = true
+  poll_interval = 500
+
+[log]
+  level = "debug"
+  output = "tmp/air.log"
+  time = false
+
+[misc]
+  clean_on_exit = true

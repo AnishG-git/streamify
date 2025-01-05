@@ -1,0 +1,19 @@
+# Build stage
+FROM golang:1.23-alpine
+
+# Install air for live reloading
+RUN go install github.com/air-verse/air@latest
+
+WORKDIR /app
+
+# Copy the entire Go application into the container
+COPY . .
+
+# Install dependencies
+RUN go mod download
+
+# Expose the port that the application will run on
+EXPOSE 8080
+
+# Set up air to run
+CMD ["air", "-c", ".air.toml"]
