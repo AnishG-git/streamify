@@ -26,28 +26,27 @@ Streamify is a real-time screen-sharing and collaboration application that allow
 ## Installation
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/username/streamify.git
-   cd streamify
-   ```
+    ```bash
+    git clone https://github.com/username/streamify.git
+    cd streamify
+    ```
 2. Install dependencies:
-   - For the backend:
-     ```bash
-     make build
-     ```
-   - For the frontend:
-     ```bash
-     npm install
-     ```
-3. Set up a PostgreSQL database and configure environment variables.
-4. Run the backend server:
-   ```bash
-   make run
-   ```
-5. Start the frontend development server:
-   ```bash
-   npm run dev
-   ```
+    - For the backend:
+      ```bash
+      make build
+      ```
+    - For the frontend:
+      ```bash
+      npm install
+      ```
+3. Run the backend server:
+    ```bash
+    make run
+    ```
+4. Start the frontend development server:
+    ```bash
+    npm run dev
+    ```
 
 ## Usage
 
