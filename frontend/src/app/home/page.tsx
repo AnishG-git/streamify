@@ -12,7 +12,6 @@ import {
   CarouselNext,
   CarouselPrevious,
 } from "@/components/ui/carousel";
-import { TypographySmall } from "@/components/ui/typography/small";
 import { TypographyH1 } from "@/components/ui/typography/h1";
 import { TypographyP } from "@/components/ui/typography/p";
 
@@ -101,7 +100,7 @@ const Home = () => {
                       Join Room
                     </Button>
                   </div>
-                  <TypographyP className="text-center font-bold">
+                  <TypographyP className="text-center font-semibold">
                     or
                   </TypographyP>
                   <Button onClick={handleCreateRoom}>
