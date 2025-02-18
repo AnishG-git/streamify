@@ -1,8 +1,8 @@
 # Config for air live reloading
 [build]
-  bin = "tmp/main" # Where the built binary will be stored
-  cmd = "go build -o tmp/main" # Build command
-  full_bin = "APP_ENV=dev tmp/main" # Command to run the built binary
+  bin = "bin/streamify" # Where the built binary will be stored
+  cmd = "go build -o bin/streamify ./cmd/streamify" # Build command
+  full_bin = "APP_ENV=dev bin/streamify" # Command to run the built binary
   poll = true
   poll_interval = 500
 
