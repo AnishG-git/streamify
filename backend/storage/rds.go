@@ -2,47 +2,59 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
-	"github.com/AnishG-git/streamify/models"
 	redis "github.com/redis/go-redis/v9"
 )
 
 type RDS struct {
-	cli *redis.Client
+	cli            *redis.Client
+	activeRoomsKey string
 }
 
 func NewRDS(cli *redis.Client) *RDS {
-	return &RDS{cli: cli}
+	return &RDS{
+		cli:            cli,
+		activeRoomsKey: "active-rooms",
+	}
 }
 
-func (r *RDS) AddUserToRoom(ctx context.Context, roomCode, name, value string) error {
-	// Using HSet to add a field to the hash (if it doesn't exist) or update it
-	return r.cli.HSet(ctx, roomCode, name, value).Err()
+func (r *RDS) CreateRoom(ctx context.Context, roomCode string) error {
+	return r.cli.SAdd(ctx, r.activeRoomsKey, roomCode).Err()
 }
 
-func (r *RDS) GetConnDetails(ctx context.Context, roomCode, name string, unmarshal bool) (*models.ConnectionDetails, string, error) {
-	// Using HGet to retrieve a field from the hash
-	connDetails, err := r.cli.HGet(ctx, roomCode, name).Result()
-	if err == redis.Nil {
-		return nil, "", fmt.Errorf("user not found")
-	}
+func (r *RDS) DeleteRoom(ctx context.Context, roomCode string) error {
+	return r.cli.SRem(ctx, r.activeRoomsKey, roomCode).Err()
+}
+
+func (r *RDS) IsRoomActive(ctx context.Context, roomCode string) (bool, error) {
+	return r.cli.SIsMember(ctx, r.activeRoomsKey, roomCode).Result()
+}
+
+func (r *RDS) CanUserJoinRoom(ctx context.Context, roomCode string, name string) error {
+	roomIsActive, err := r.IsRoomActive(ctx, roomCode)
 	if err != nil {
-		return nil, "", err
+		return err
 	}
-
-	if !unmarshal {
-		return nil, connDetails, nil
+	if !roomIsActive {
+		return fmt.Errorf("room %s does not exist in active set", roomCode)
 	}
-
-	var unmarshalledConnDetails models.ConnectionDetails
-	err = json.Unmarshal([]byte(connDetails), &unmarshalledConnDetails)
+	roomOccupancy, err := r.GetRoomOccupancy(ctx, roomCode)
 	if err != nil {
-		return nil, "", err
+		return err
 	}
-
-	return &unmarshalledConnDetails, "", nil
+	if roomOccupancy < 2 {
+		// check if user already exists in room
+		userExists, err := r.cli.HExists(ctx, roomCode, name).Result()
+		if err != nil {
+			return err
+		}
+		if userExists {
+			return fmt.Errorf("user %s already exists in room %s", name, roomCode)
+		}
+		return nil
+	}
+	return fmt.Errorf("room %s is at capacity", roomCode)
 }
 
 func (r *RDS) GetRoomOccupancy(ctx context.Context, roomCode string) (int, error) {
@@ -54,35 +66,24 @@ func (r *RDS) GetRoomOccupancy(ctx context.Context, roomCode string) (int, error
 	return int(occupancy), nil
 }
 
-func (r *RDS) CheckForUser (ctx context.Context, roomCode, name string) (bool, error) {
-	// Using HExists to check if a field exists in the hash
-	exists, err := r.cli.HExists(ctx, roomCode, name).Result()
-	if err != nil {
-		return false, err
-	}
-	return exists, nil
+func (r *RDS) AddUserToRoom(ctx context.Context, roomCode, name, value string) error {
+	return r.cli.HSet(ctx, roomCode, name, value).Err()
 }
 
-func (r *RDS) CheckForRoom(ctx context.Context, roomCode string) (bool, error) {
-	// Using Exists to check if the key exists
-	exists, err := r.cli.Exists(ctx, roomCode).Result()
-	if err != nil {
-		return false, err
-	}
-	if exists <= 0 {
-		return false, nil
-	}
-	return true, nil
-}
-
-func (r *RDS) RemoveUserDetails(ctx context.Context, roomCode, name string) error {
-	// Using HDel to delete a field from the hash
+func (r *RDS) RemoveUserFromRoom(ctx context.Context, roomCode, name string) error {
 	return r.cli.HDel(ctx, roomCode, name).Err()
 }
 
-func (r *RDS) RemoveRoom(ctx context.Context, roomCode string) error {
-	// Using Del to delete a key
-	return r.cli.Del(ctx, roomCode).Err()
+func (r *RDS) GetUserConnectionDetails(ctx context.Context, roomCode, name string) (string, error) {
+	// Using HGet to retrieve a field from the hash
+	connDetails, err := r.cli.HGet(ctx, roomCode, name).Result()
+	if err == redis.Nil {
+		return "", fmt.Errorf("user %s not found in room %s", name, roomCode)
+	}
+	if err != nil {
+		return "", err
+	}
+	return connDetails, nil
 }
 
 func (r *RDS) GetUserNamesFromRoom(ctx context.Context, roomCode string) ([]string, error) {

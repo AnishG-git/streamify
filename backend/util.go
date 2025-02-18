@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/AnishG-git/streamify/models"
 	"github.com/gorilla/websocket"
 	"golang.org/x/exp/rand"
 )
@@ -22,87 +24,24 @@ func generateRoomCode() string {
 	return sb.String()
 }
 
-// func (s *server) addUserToRoom(ctx context.Context, roomCode, name, value string) error {
-// 	// Using HSet to add a field to the hash (if it doesn't exist) or update it
-// 	return s.RDS.HSet(ctx, roomCode, name, value).Err()
-// }
-
-// func (s *server) getConnDetails(ctx context.Context, roomCode, name string, unmarshal bool) (*ConnectionDetails, string, error) {
-// 	// Using HGet to retrieve a field from the hash
-// 	connDetails, err := s.RDS.HGet(ctx, roomCode, name).Result()
-// 	if err == redis.Nil {
-// 		return nil, "", fmt.Errorf("user not found")
-// 	}
-// 	if err != nil {
-// 		return nil, "", err
-// 	}
-
-// 	if !unmarshal {
-// 		return nil, connDetails, nil
-// 	}
-
-// 	var unmarshalledConnDetails ConnectionDetails
-// 	err = json.Unmarshal([]byte(connDetails), &unmarshalledConnDetails)
-// 	if err != nil {
-// 		return nil, "", err
-// 	}
-
-// 	return &unmarshalledConnDetails, "", nil
-// }
-
-// func (s *server) getRoomOccupancy(ctx context.Context, roomCode string) (int, error) {
-// 	// Using HLen to get the number of fields in the hash
-// 	occupancy, err := s.RDS.HLen(ctx, roomCode).Result()
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	return int(occupancy), nil
-// }
-
-// func (s *server) checkForRoom(ctx context.Context, roomCode string) (bool, error) {
-// 	// Using Exists to check if the key exists
-// 	exists, err := s.RDS.Exists(ctx, roomCode).Result()
-// 	if err != nil {
-// 		return false, err
-// 	}
-// 	if exists <= 0 {
-// 		return false, nil
-// 	}
-// 	return true, nil
-// }
-
-// func (s *server) removeUserDetails(ctx context.Context, roomCode, name string) error {
-// 	// Using HDel to delete a field from the hash
-// 	return s.RDS.HDel(ctx, roomCode, name).Err()
-// }
-
-// func (s *server) removeRoom(ctx context.Context, roomCode string) error {
-// 	// Using Del to delete a key
-// 	return s.RDS.Del(ctx, roomCode).Err()
-// }
-
 func (s *server) removeConnectionFromRoom(ctx context.Context, roomCode string, name string) {
 	storage := s.RDS
-	
-	// log and return if room code does not exist
-	exists, err := storage.CheckForRoom(ctx, roomCode)
-	if err != nil {
-		s.Logger.Printf("Failed to check existence of room %s: %v", roomCode, err)
-		return
-	}
-	if !exists {
-		s.Logger.Printf("Room %s does not exist, connection may have been removed already", roomCode)
-		return
-	}
 
 	// removing connection details from redis
-	connDetails, _, err := storage.GetConnDetails(ctx, roomCode, name, true)
+	connDetailsStr, err := storage.GetUserConnectionDetails(ctx, roomCode, name)
 	if err != nil {
 		s.Logger.Printf("Failed to get connection details for %s in room %s", name, roomCode)
 		return
 	}
 
-	err = storage.RemoveUserDetails(ctx, roomCode, name)
+	var connDetails models.ConnectionDetails
+	err = json.Unmarshal([]byte(connDetailsStr), &connDetails)
+	if err != nil {
+		s.Logger.Printf("Failed to unmarshal connection details for %s in room %s", name, roomCode)
+		return
+	}
+
+	err = storage.RemoveUserFromRoom(ctx, roomCode, name)
 	if err != nil {
 		s.Logger.Printf("Failed to remove user %s from room %s", name, roomCode)
 		return
@@ -126,7 +65,7 @@ func (s *server) removeConnectionFromRoom(ctx context.Context, roomCode string, 
 	const maxAttempts = 10
 	const sleepTime = 500
 	for i := 0; i < maxAttempts; i++ {
-		s.Logger.Printf("Room %s is empty, waiting for %v ms before removing", sleepTime)
+		s.Logger.Printf("Room %s is empty, waiting for %v ms before removing", roomCode, sleepTime)
 		roomOccupancy, err = storage.GetRoomOccupancy(ctx, roomCode)
 		if err != nil {
 			s.Logger.Printf("Failed to get room occupancy for room %s in sleep", roomCode)
@@ -138,16 +77,11 @@ func (s *server) removeConnectionFromRoom(ctx context.Context, roomCode string, 
 	}
 
 	// If the room is still empty, delete it
-	err = storage.RemoveRoom(ctx, roomCode)
+	err = storage.DeleteRoom(ctx, roomCode)
 	if err != nil {
 		s.Logger.Printf("Failed to remove room %s", roomCode)
 	}
 }
-
-// func (s *server) getUserNamesFromRoom(ctx context.Context, roomCode string) ([]string, error) {
-// 	// Using HKeys to get all the fields in the hash
-// 	return s.RDS.HKeys(ctx, roomCode).Result()
-// }
 
 // the returned connection is faulty if and only if the returned error is not nil
 func (s *server) broadcastToRoom(ctx context.Context, roomCode string, sender string, message map[string]interface{}) (string, error) {
@@ -160,10 +94,17 @@ func (s *server) broadcastToRoom(ctx context.Context, roomCode string, sender st
 	}
 
 	for _, name := range names {
-		connDetails, _, err := storage.GetConnDetails(ctx, roomCode, name, true)
+		connDetailsStr, err := storage.GetUserConnectionDetails(ctx, roomCode, name)
 		if err != nil {
 			return "", err
 		}
+
+		var connDetails models.ConnectionDetails
+		err = json.Unmarshal([]byte(connDetailsStr), &connDetails)
+		if err != nil {
+			s.Logger.Printf("Failed to unmarshal connection details for %s in room %s", name, roomCode)
+		}
+
 		conn, ok := s.connections[connDetails.ConnectionID]
 		if !ok {
 			return "", fmt.Errorf("connection not found for user %s in room %s", name, roomCode)
@@ -179,7 +120,7 @@ func (s *server) broadcastToRoom(ctx context.Context, roomCode string, sender st
 }
 
 func (s *server) sendErrorMessage(conn *websocket.Conn, message string) {
-	s.Logger.Printf(message)
+	s.Logger.Print(message)
 	conn.WriteJSON(map[string]string{
 		"type":  "error",
 		"error": message,

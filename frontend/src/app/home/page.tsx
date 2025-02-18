@@ -26,7 +26,7 @@ const Home = () => {
       return;
     }
 
-    const response = await fetch(`http://localhost:8080/room/generate?name=${name}`, {
+    const response = await fetch(`http://localhost:8080/room/generate`, {
       method: "GET",
     });
 

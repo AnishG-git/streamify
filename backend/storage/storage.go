@@ -2,16 +2,21 @@ package storage
 
 import (
 	"context"
-	"github.com/AnishG-git/streamify/models"
 )
 
 type Storage interface {
-	AddUserToRoom(ctx context.Context, roomCode, name, value string) error
-	GetConnDetails(ctx context.Context, roomCode, name string, unmarshal bool) (*models.ConnectionDetails, string, error)
+	// Room Management
+	CreateRoom(ctx context.Context, roomCode string) error
+	DeleteRoom(ctx context.Context, roomCode string) error
+	IsRoomActive(ctx context.Context, roomCode string) (bool, error)
 	GetRoomOccupancy(ctx context.Context, roomCode string) (int, error)
-	CheckForUser(ctx context.Context, roomCode, name string) (bool, error)
-	CheckForRoom(ctx context.Context, roomCode string) (bool, error)
-	RemoveUserDetails(ctx context.Context, roomCode, name string) error
-	RemoveRoom(ctx context.Context, roomCode string) error
+
+	// User Management
+	AddUserToRoom(ctx context.Context, roomCode, username, connID string) error
+	RemoveUserFromRoom(ctx context.Context, roomCode, username string) error
 	GetUserNamesFromRoom(ctx context.Context, roomCode string) ([]string, error)
+	GetUserConnectionDetails(ctx context.Context, roomCode, username string) (string, error)
+
+	// User can join room if and only if the returned error is nil
+	CanUserJoinRoom(ctx context.Context, roomCode, name string) error
 }

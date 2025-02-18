@@ -54,31 +54,28 @@ func (s *server) generateRoomHandler() http.HandlerFunc {
 		storage := s.RDS
 		s.Logger.Print("/room/generate endpoint called")
 		w.Header().Set("Content-Type", "application/json")
-		name := r.URL.Query().Get("name")
 
-		roomCode := generateRoomCode()
-
+		var roomCode string
 		for {
-			exists, err := storage.CheckForRoom(ctx, roomCode)
+			roomCode = generateRoomCode()
+			exists, err := storage.IsRoomActive(ctx, roomCode)
 			if err != nil {
 				s.Logger.Printf("Failed to check room code existence: %v", err)
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
-			if exists {
+			if !exists {
 				break
 			}
-			roomCode = generateRoomCode()
 		}
 
-		err := storage.AddUserToRoom(ctx, roomCode, name, "init")
+		err := storage.CreateRoom(ctx, roomCode)
 		if err != nil {
 			s.Logger.Printf("Failed to set room code: %v", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
-		// DEBUGGING (DELETE LATER)
 		s.Logger.Printf("Room %s created", roomCode)
 
 		w.WriteHeader(http.StatusOK)
@@ -114,53 +111,9 @@ func (s *server) connectRoomHandler() http.HandlerFunc {
 
 		var errMsg string
 
-		// returning an error if room code does not exist
-		exists, err := storage.CheckForRoom(ctx, roomCode)
+		err = storage.CanUserJoinRoom(ctx, roomCode, name)
 		if err != nil {
-			errMsg = fmt.Sprintf("Failed to check room code existence: %v", err)
-			s.sendErrorMessage(conn, errMsg)
-			return
-		}
-
-		if !exists {
-			errMsg = fmt.Sprintf("Room %s does not exist", roomCode)
-			s.sendErrorMessage(conn, errMsg)
-			return
-		}
-
-		// checking if user with same name already exists in room
-		userExists, err := storage.CheckForUser(ctx, roomCode, name)
-		if err != nil {
-			errMsg = fmt.Sprintf("Failed to check if user with name %s is in room %s: %v", name, roomCode, err)
-			s.sendErrorMessage(conn, errMsg)
-			return
-		}
-
-		// checking if user is the one who created the room
-		if userExists {
-			_, connDetailsStr, err := storage.GetConnDetails(ctx, roomCode, name, false)
-			if err != nil {
-				errMsg = fmt.Sprintf("Failed to get connection details for %s in room %s: %v", name, roomCode, err)
-				s.sendErrorMessage(conn, errMsg)
-				return
-			}
-			if connDetailsStr != "init" {
-				errMsg = fmt.Sprintf("User with name %s already exists in room %s", name, roomCode)
-				s.sendErrorMessage(conn, errMsg)
-				return
-			}
-		}
-
-		// returning an error if room is at capacity
-		roomCapacity, err := storage.GetRoomOccupancy(ctx, roomCode)
-		if err != nil {
-			errMsg = fmt.Sprintf("Failed to get room capacity: %v", err)
-			s.sendErrorMessage(conn, errMsg)
-			return
-		}
-
-		if roomCapacity == 2 {
-			errMsg = fmt.Sprintf("Room %s is at capacity", roomCode)
+			errMsg = fmt.Sprintf("User cannot join room: %v", err)
 			s.sendErrorMessage(conn, errMsg)
 			return
 		}
@@ -168,6 +121,7 @@ func (s *server) connectRoomHandler() http.HandlerFunc {
 		// checks have passed, adding connection to room
 		connID := uuid.NewString()
 
+		// adding connection to in-memory map
 		s.mu.Lock()
 		s.connections[connID] = conn
 		s.mu.Unlock()
