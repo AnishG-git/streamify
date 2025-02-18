@@ -9,13 +9,13 @@ import (
 
 func main() {
 	mainLog := log.Default()
-	db, err := loadDB("streamify", false)
+	rds, err := mustLoadRedis()
 	if err != nil {
 		mainLog.Fatalf("Failed to load database: %s", err)
 	}
 	mainLog.Print("Connected to database")
 
-	server := newServer(":8080", db, mainLog)
+	server := newServer(":8080", rds, mainLog)
 	errCh := make(chan error)
 
 	go func() {

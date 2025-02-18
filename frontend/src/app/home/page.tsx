@@ -26,7 +26,7 @@ const Home = () => {
       return;
     }
 
-    const response = await fetch("http://localhost:8080/room/generate", {
+    const response = await fetch(`http://localhost:8080/room/generate?name=${name}`, {
       method: "GET",
     });
 
@@ -46,6 +46,7 @@ const Home = () => {
     }
 
     try {
+      sessionStorage.setItem("name", name);
       router.push(`/room/${roomCode.code}`);
     } catch {
       alert("Failed to generate room");
@@ -59,6 +60,7 @@ const Home = () => {
     }
 
     if (joinCode.length === 5) {
+      sessionStorage.setItem("name", name);
       router.push(`/room/${joinCode}`);
     } else {
       alert("Please enter a valid 5-character room code.");

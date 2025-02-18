@@ -1,35 +1,41 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
 
+	"github.com/AnishG-git/streamify/models"
+	"github.com/AnishG-git/streamify/storage"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
 
 type server struct {
-	Router  *mux.Router
-	Address string
-	DB      *sql.DB
-	Logger  *log.Logger
-	Rooms   map[string][]*websocket.Conn
-	mu      sync.RWMutex
+	Router      *mux.Router
+	Address     string
+	RDS         storage.Storage
+	connections map[string]*websocket.Conn
+	mu          *sync.Mutex
+	serverID    string
+	Logger      *log.Logger
 }
 
-func newServer(addr string, db *sql.DB, logger *log.Logger) *server {
+func newServer(addr string, storage storage.Storage, logger *log.Logger) *server {
 	router := mux.NewRouter()
 
 	s := &server{
-		Router:  router,
-		Address: addr,
-		DB:      db,
-		Logger:  logger,
-		mu:      sync.RWMutex{},
-		Rooms:   make(map[string][]*websocket.Conn),
+		Router:      router,
+		Address:     addr,
+		RDS:         storage,
+		connections: make(map[string]*websocket.Conn),
+		mu:          &sync.Mutex{},
+		serverID:    uuid.NewString(),
+		Logger:      logger,
 	}
 
 	s.routes()
@@ -44,33 +50,54 @@ func (s *server) routes() {
 
 func (s *server) generateRoomHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		storage := s.RDS
 		s.Logger.Print("/room/generate endpoint called")
 		w.Header().Set("Content-Type", "application/json")
+		name := r.URL.Query().Get("name")
 
-		code := generateRoomCode()
+		roomCode := generateRoomCode()
 
-		// check if the room code already exists
-		s.mu.Lock()
-		for _, exists := s.Rooms[code]; exists; _, exists = s.Rooms[code] {
-			code = generateRoomCode()
+		for {
+			exists, err := storage.CheckForRoom(ctx, roomCode)
+			if err != nil {
+				s.Logger.Printf("Failed to check room code existence: %v", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			if exists {
+				break
+			}
+			roomCode = generateRoomCode()
 		}
-		s.Rooms[code] = make([]*websocket.Conn, 0, 2)
-		s.mu.Unlock()
+
+		err := storage.AddUserToRoom(ctx, roomCode, name, "init")
+		if err != nil {
+			s.Logger.Printf("Failed to set room code: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 
 		// DEBUGGING (DELETE LATER)
-		s.Logger.Printf("Room %s created", code)
+		s.Logger.Printf("Room %s created", roomCode)
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"code": code})
+		json.NewEncoder(w).Encode(map[string]string{"code": roomCode})
 	}
 }
 
 func (s *server) connectRoomHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		storage := s.RDS
+		s.Logger.Print("/connect endpoint called")
+
+		// getting room code and name from URL
 		vars := mux.Vars(r)
 		roomCode := vars["code"]
+		name := r.URL.Query().Get("name")
 
-		// Attempt to upgrade to WebSocket
+		// attempting to upgrade to WebSocket connection
 		upgrader := websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for simplicity; restrict in production
@@ -85,47 +112,112 @@ func (s *server) connectRoomHandler() http.HandlerFunc {
 		}
 		defer conn.Close()
 
+		var errMsg string
+
+		// returning an error if room code does not exist
+		exists, err := storage.CheckForRoom(ctx, roomCode)
+		if err != nil {
+			errMsg = fmt.Sprintf("Failed to check room code existence: %v", err)
+			s.sendErrorMessage(conn, errMsg)
+			return
+		}
+
+		if !exists {
+			errMsg = fmt.Sprintf("Room %s does not exist", roomCode)
+			s.sendErrorMessage(conn, errMsg)
+			return
+		}
+
+		// checking if user with same name already exists in room
+		userExists, err := storage.CheckForUser(ctx, roomCode, name)
+		if err != nil {
+			errMsg = fmt.Sprintf("Failed to check if user with name %s is in room %s: %v", name, roomCode, err)
+			s.sendErrorMessage(conn, errMsg)
+			return
+		}
+
+		// checking if user is the one who created the room
+		if userExists {
+			_, connDetailsStr, err := storage.GetConnDetails(ctx, roomCode, name, false)
+			if err != nil {
+				errMsg = fmt.Sprintf("Failed to get connection details for %s in room %s: %v", name, roomCode, err)
+				s.sendErrorMessage(conn, errMsg)
+				return
+			}
+			if connDetailsStr != "init" {
+				errMsg = fmt.Sprintf("User with name %s already exists in room %s", name, roomCode)
+				s.sendErrorMessage(conn, errMsg)
+				return
+			}
+		}
+
+		// returning an error if room is at capacity
+		roomCapacity, err := storage.GetRoomOccupancy(ctx, roomCode)
+		if err != nil {
+			errMsg = fmt.Sprintf("Failed to get room capacity: %v", err)
+			s.sendErrorMessage(conn, errMsg)
+			return
+		}
+
+		if roomCapacity == 2 {
+			errMsg = fmt.Sprintf("Room %s is at capacity", roomCode)
+			s.sendErrorMessage(conn, errMsg)
+			return
+		}
+
+		// checks have passed, adding connection to room
+		connID := uuid.NewString()
+
 		s.mu.Lock()
-		if _, exists := s.Rooms[roomCode]; !exists {
-			s.mu.Unlock()
-			conn.WriteJSON(map[string]string{
-				"type":  "error",
-				"error": "invalid room code",
-			})
-			return
-		}
-
-		if len(s.Rooms[roomCode]) == 2 {
-			s.mu.Unlock()
-			conn.WriteJSON(map[string]string{
-				"type":  "error",
-				"error": "Room is full",
-			})
-			return
-		}
-
-		s.Rooms[roomCode] = append(s.Rooms[roomCode], conn)
+		s.connections[connID] = conn
 		s.mu.Unlock()
-		s.Logger.Printf("New connection to room: %s", roomCode)
 
+		marshalledConnObj, err := json.Marshal(
+			models.ConnectionDetails{
+				ServerID:     s.serverID,
+				ConnectionID: connID,
+			},
+		)
+		if err != nil {
+			errMsg = fmt.Sprintf("Failed to marshal connection object: %v", err)
+			s.sendErrorMessage(conn, errMsg)
+			return
+		}
+
+		err = storage.AddUserToRoom(ctx, roomCode, name, string(marshalledConnObj))
+		if err != nil {
+			errMsg = fmt.Sprintf("Failed to add connection to room: %v", err)
+			s.sendErrorMessage(conn, errMsg)
+			return
+		}
+
+		s.Logger.Printf("User %s has joined room %s", name, roomCode)
+		ctxWithoutCancel := context.WithoutCancel(ctx)
 		for {
 			var message map[string]interface{}
 			err := conn.ReadJSON(&message)
 			if err != nil {
 				// Handle normal WebSocket closure without logging an error
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-					s.Logger.Printf("Unexpected WebSocket close error: %v", err)
+					s.Logger.Printf("Unexpected WebSocket close error for user %s in room %s: %v", name, roomCode, err)
 				} else {
-					s.Logger.Printf("WebSocket closed for room %s: %v", roomCode, err)
+					s.Logger.Printf("WebSocket closed for user %s in room %s: %v", name, roomCode, err)
 				}
 
 				// Remove connection from room
-				go s.removeConnectionFromRoom(roomCode, conn)
+				go s.removeConnectionFromRoom(ctxWithoutCancel, roomCode, name)
 				break
 			}
 
-			s.Logger.Printf("Message from %s: %v", roomCode, message)
-			// Broadcast message to other connections in the room (implementation needed)
+			faultyReceiverName, err := s.broadcastToRoom(ctx, roomCode, name, message)
+			if err != nil {
+				s.Logger.Printf("Failed to send message to room %s: %v", roomCode, err)
+				if faultyReceiverName != "" {
+					go s.removeConnectionFromRoom(ctxWithoutCancel, roomCode, name) // Remove faulty connection
+				}
+			} else {
+				s.Logger.Printf("Message from %s: %v", roomCode, message)
+			}
 		}
 	}
 }

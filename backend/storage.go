@@ -1,37 +1,28 @@
 package main
 
 import (
-	"database/sql"
-	"fmt"
+	"context"
+	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/AnishG-git/streamify/storage"
+	"github.com/redis/go-redis/v9"
 )
 
-const (
-	username      = "postgres"
-	password      = "postgres"
-	pgcontainer   = "db"
-	migrationsDir = "./migrations"
-)
+func mustLoadRedis() (storage.Storage, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr: "redis:6379",
+		DB:   0,
+	})
 
-func loadDB(dbname string, external bool) (*sql.DB, error) {
-	// Load the database
-	host := "db"
-	port := 5432
-	if external {
-		host = "localhost"
-		port = 5434
-	}
-	connStr := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%d sslmode=disable", username, password, dbname, host, port)
-	db, err := sql.Open("postgres", connStr)
+	// Test connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := client.Ping(ctx).Result()
 	if err != nil {
 		return nil, err
 	}
 
-	err = db.Ping()
-	if err != nil {
-		return nil, err
-	}
-
-	return db, err
+	rds := storage.NewRDS(client)
+	return rds, nil
 }

@@ -1,15 +1,9 @@
 services:
-  db:
-    image: postgres:12.19-bullseye
+  redis:
+    image: redis:7-alpine
     restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: streamify
     ports:
-      - "5434:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
+      - "6379:6379"
 
   web:
     restart: always
@@ -21,8 +15,4 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - db
-
-volumes:
-  db_data:
-    driver: local
+      - redis
