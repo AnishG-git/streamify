@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/AnishG-git/streamify/storage"
+	"github.com/AnishG-git/streamify/internal/storage"
 	"github.com/redis/go-redis/v9"
 )
 

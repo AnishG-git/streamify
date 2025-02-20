@@ -15,7 +15,8 @@ func main() {
 	}
 	mainLog.Print("Connected to database")
 
-	server := newServer(":8080", rds, mainLog)
+	const addr = ":8080"
+	server := newServer(mainLog, addr, rds)
 	errCh := make(chan error)
 
 	go func() {
@@ -26,7 +27,7 @@ func main() {
 			handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
 			handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
 		)
-		if err := http.ListenAndServe(server.Address, cors(server.Router)); err != nil {
+		if err := http.ListenAndServe(server.address, cors(server.router)); err != nil {
 			mainLog.Printf("Server failed: %s", err)
 			errCh <- err
 		}

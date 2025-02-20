@@ -1,6 +1,6 @@
 package models
 
 type ConnectionDetails struct {
-	ServerID     string `json:"serverID"`
+	ManagerID    string `json:"managerID"`
 	ConnectionID string `json:"connectionID"`
 }

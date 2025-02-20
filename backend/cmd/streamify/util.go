@@ -4,46 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/AnishG-git/streamify/models"
+	rdsModels "github.com/AnishG-git/streamify/internal/storage/models"
 	"github.com/gorilla/websocket"
-	"golang.org/x/exp/rand"
 )
 
-func generateRoomCode() string {
-	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	const length = 5
-	var sb strings.Builder
-	sb.Grow(length)
-	rand.Seed(uint64(time.Now().UnixNano()))
-	for i := 0; i < length; i++ {
-		sb.WriteByte(charset[rand.Intn(len(charset))])
-	}
-	return sb.String()
-}
-
 func (s *server) removeConnectionFromRoom(ctx context.Context, roomCode string, name string) {
-	storage := s.RDS
+	storage := s.rds
 
 	// removing connection details from redis
 	connDetailsStr, err := storage.GetUserConnectionDetails(ctx, roomCode, name)
 	if err != nil {
-		s.Logger.Printf("Failed to get connection details for %s in room %s", name, roomCode)
+		s.logger.Printf("Failed to get connection details for %s in room %s", name, roomCode)
 		return
 	}
 
-	var connDetails models.ConnectionDetails
+	var connDetails rdsModels.ConnectionDetails
 	err = json.Unmarshal([]byte(connDetailsStr), &connDetails)
 	if err != nil {
-		s.Logger.Printf("Failed to unmarshal connection details for %s in room %s", name, roomCode)
+		s.logger.Printf("Failed to unmarshal connection details for %s in room %s", name, roomCode)
 		return
 	}
 
 	err = storage.RemoveUserFromRoom(ctx, roomCode, name)
 	if err != nil {
-		s.Logger.Printf("Failed to remove user %s from room %s", name, roomCode)
+		s.logger.Printf("Failed to remove user %s from room %s", name, roomCode)
 		return
 	}
 
@@ -55,7 +41,7 @@ func (s *server) removeConnectionFromRoom(ctx context.Context, roomCode string, 
 	// return if the room is not empty
 	roomOccupancy, err := storage.GetRoomOccupancy(ctx, roomCode)
 	if err != nil {
-		s.Logger.Printf("Failed to get room occupancy for room %s", roomCode)
+		s.logger.Printf("Failed to get room occupancy for room %s", roomCode)
 		return
 	}
 	if roomOccupancy > 0 {
@@ -65,10 +51,10 @@ func (s *server) removeConnectionFromRoom(ctx context.Context, roomCode string, 
 	const maxAttempts = 10
 	const sleepTime = 500
 	for i := 0; i < maxAttempts; i++ {
-		s.Logger.Printf("Room %s is empty, waiting for %v ms before removing", roomCode, sleepTime)
+		s.logger.Printf("Room %s is empty, waiting for %v ms before removing", roomCode, sleepTime)
 		roomOccupancy, err = storage.GetRoomOccupancy(ctx, roomCode)
 		if err != nil {
-			s.Logger.Printf("Failed to get room occupancy for room %s in sleep", roomCode)
+			s.logger.Printf("Failed to get room occupancy for room %s in sleep", roomCode)
 		}
 		if roomOccupancy > 0 {
 			return
@@ -79,17 +65,17 @@ func (s *server) removeConnectionFromRoom(ctx context.Context, roomCode string, 
 	// If the room is still empty, delete it
 	err = storage.DeleteRoom(ctx, roomCode)
 	if err != nil {
-		s.Logger.Printf("Failed to remove room %s", roomCode)
+		s.logger.Printf("Failed to remove room %s", roomCode)
 	}
 }
 
 // the returned connection is faulty if and only if the returned error is not nil
 func (s *server) broadcastToRoom(ctx context.Context, roomCode string, sender string, message map[string]interface{}) (string, error) {
 	// Iterate over all connections in the room
-	storage := s.RDS
+	storage := s.rds
 	names, err := storage.GetUserNamesFromRoom(ctx, roomCode)
 	if err != nil {
-		s.Logger.Printf("Failed to get user names from room %s", roomCode)
+		s.logger.Printf("Failed to get user names from room %s", roomCode)
 		return "", err
 	}
 
@@ -99,10 +85,10 @@ func (s *server) broadcastToRoom(ctx context.Context, roomCode string, sender st
 			return "", err
 		}
 
-		var connDetails models.ConnectionDetails
+		var connDetails rdsModels.ConnectionDetails
 		err = json.Unmarshal([]byte(connDetailsStr), &connDetails)
 		if err != nil {
-			s.Logger.Printf("Failed to unmarshal connection details for %s in room %s", name, roomCode)
+			s.logger.Printf("Failed to unmarshal connection details for %s in room %s", name, roomCode)
 		}
 
 		conn, ok := s.connections[connDetails.ConnectionID]
@@ -120,7 +106,7 @@ func (s *server) broadcastToRoom(ctx context.Context, roomCode string, sender st
 }
 
 func (s *server) sendErrorMessage(conn *websocket.Conn, message string) {
-	s.Logger.Print(message)
+	s.logger.Print(message)
 	conn.WriteJSON(map[string]string{
 		"type":  "error",
 		"error": message,

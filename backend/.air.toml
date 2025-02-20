@@ -3,6 +3,7 @@
   bin = "bin/streamify" # Where the built binary will be stored
   cmd = "go build -o bin/streamify ./cmd/streamify" # Build command
   full_bin = "APP_ENV=dev bin/streamify" # Command to run the built binary
+  exclude_dir = ["bin", "tmp"]
   poll = true
   poll_interval = 500
 
