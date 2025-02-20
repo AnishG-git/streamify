@@ -62,22 +62,32 @@ Streamify is a real-time screen-sharing and collaboration application that allow
 ## Project Structure
 
 ```
-streamify/
-├── backend/
-│   ├── main.go
-│   ├── handlers/
-│   ├── models/
-│   ├── storage/
-│   └── utils/
-├── frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── home/
-│   │   │   │   └── page.tsx
-│   │   │   └── room/
-│   │   │       └── [roomCode]/page.tsx
-│   └── tailwind.config.ts
-└── docker-compose.yml
+Directory structure:
+└── anishg-git-streamify/
+    ├── README.md
+    ├── backend/
+    │   ├── cmd/
+    │   │   └── streamify/
+    │   └── internal/
+    │       ├── connections/
+    │       ├── handlers/
+    │       ├── logic/
+    │       └── storage/
+    │           └── models/
+    └── frontend/
+        ├── public/
+        └── src/
+            ├── app/
+            │   ├── fonts/
+            │   ├── home/
+            │   └── room/
+            │       └── [roomCode]/
+            ├── components/
+            │   └── ui/
+            │       └── typography/
+            └── lib/
+                └── utils.ts
+
 ```
 
 ## Roadmap
